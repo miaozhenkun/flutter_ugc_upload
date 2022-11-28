@@ -26,7 +26,7 @@ class _MyAppState extends State<MyApp> {
     FlutterUgcUpload().onProgressResult().listen((event) {
       if (kDebugMode) {
         print('收到上传进度事件');
-        print(event.progress);
+        print(event.totalBytes);
       }
     });
   }

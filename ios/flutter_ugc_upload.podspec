@@ -16,8 +16,12 @@ flutter_ugc_upload
   s.source_files = 'Classes/**/*'
   s.public_header_files = 'Classes/**/*.h'
   s.dependency 'Flutter'
-  s.platform = :ios, '9.0'
-
+  s.dependency 'QCloudQuic/Slim'
+  s.dependency 'AFNetworking'
+  s.static_framework = true
+  s.frameworks = 'CoreTelephony','Foundation','SystemConfiguration'
+  s.libraries = 'c++'
+  s.platform = :ios, '11.0'
   # Flutter.framework does not contain a i386 slice.
   s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES', 'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386' }
 end

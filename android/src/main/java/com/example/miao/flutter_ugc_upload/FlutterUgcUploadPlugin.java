@@ -66,7 +66,7 @@ public class FlutterUgcUploadPlugin implements FlutterPlugin, MethodCallHandler,
         Map map =new HashMap();
         map.put("uploadBytes", uploadBytes);
         map.put("totalBytes",  totalBytes);
-        map.put("progress",  (int) (100*uploadBytes/totalBytes));
+        map.put("method",  "publishProgress");
         mEventSink.success(map);
       }
 
@@ -74,11 +74,12 @@ public class FlutterUgcUploadPlugin implements FlutterPlugin, MethodCallHandler,
       public void onPublishComplete(TXUGCPublishTypeDef.TXPublishResult res) {
         Map map = new HashMap();
         map.put("retCode",res.retCode);
-        map.put("coverURL",res.coverURL);
-        map.put("videoURL",res.videoURL);
-        map.put("videoId",res.videoId);
         map.put("descMsg",res.descMsg);
-        result.success(map);
+        map.put("videoId",res.videoId);
+        map.put("videoURL",res.videoURL);
+        map.put("coverURL",res.coverURL);
+        map.put("method",  "publishComplete");
+        mEventSink.success(map);
       }
     });
     TXUGCPublishTypeDef.TXPublishParam param = new TXUGCPublishTypeDef.TXPublishParam();
@@ -88,6 +89,7 @@ public class FlutterUgcUploadPlugin implements FlutterPlugin, MethodCallHandler,
       param.coverPath = call.argument("coverPath");
     }
     int publishCode = mVideoPublish.publishVideo(param);
+    result.success(publishCode);
   }
 
   @Override
