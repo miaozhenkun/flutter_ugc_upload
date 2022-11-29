@@ -1,6 +1,6 @@
 name: flutter_ugc_upload
 description: flutter_ugc_upload 腾讯云点播文件上传插件
-version: 0.0.2
+version: 0.0.3
 homepage: https://github.com/miaozhenkun/flutter_ugc_upload
 
 environment:

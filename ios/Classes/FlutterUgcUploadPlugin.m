@@ -1,8 +1,11 @@
 #import "FlutterUgcUploadPlugin.h"
-#import "FlutterUgcUploadPluginStream.h"
 #import "TXUGCPublish.h"
 
-@implementation FlutterUgcUploadPlugin
+@implementation FlutterUgcUploadPlugin{
+    FlutterEventSink _eventSink;
+    TXUGCPublish *_txUgcPublish;
+    NSString *customKey;
+}
 + (void)registerWithRegistrar:(NSObject<FlutterPluginRegistrar>*)registrar {
   FlutterMethodChannel* channel = [FlutterMethodChannel
       methodChannelWithName:@"flutter_ugc_upload"
@@ -10,27 +13,42 @@
   FlutterUgcUploadPlugin* instance = [[FlutterUgcUploadPlugin alloc] init];
   [registrar addMethodCallDelegate:instance channel:channel];
     
-    FlutterEventChannel *eventChanel = [FlutterEventChannel eventChannelWithName:@"flutter_ugc_upload_stream" binaryMessenger:[registrar messenger]];
-      [eventChanel setStreamHandler:[[FlutterUgcUploadPluginStream sharedInstance] streamHandler]];
+    FlutterEventChannel *eventChannel = [FlutterEventChannel eventChannelWithName:@"flutter_ugc_upload_stream" binaryMessenger:[registrar messenger]];
+    [eventChannel setStreamHandler:instance];
 }
 
 - (void)handleMethodCall:(FlutterMethodCall*)call result:(FlutterResult)result {
   if ([@"getPlatformVersion" isEqualToString:call.method]) {
     result([@"iOS " stringByAppendingString:[[UIDevice currentDevice] systemVersion]]);
-  }else if ([@"uploadVideo" isEqualToString:call.method]){
+  }else if ([@"setCustomKey" isEqualToString:call.method]) {
+      [self setCustomKey:call result:result];
+  } else if ([@"uploadVideo" isEqualToString:call.method]){
       [self uploadVideo : call result:result];
   } else {
     result(FlutterMethodNotImplemented);
   }
 }
 
+- (void)setCustomKey:(FlutterMethodCall*)call
+              result:(FlutterResult)result
+{
+    NSString *customKey = call.arguments[@"customKey"];
+    
+    if (self->_txUgcPublish == nil || (customKey != nil && ![customKey isEqualToString:self->customKey])) {
+        self->_txUgcPublish = [[TXUGCPublish alloc] initWithUserID:customKey];
+        self->_txUgcPublish.delegate = (id)self;
+    }
+
+    self->customKey = customKey;
+}
+
+
 - (void) uploadVideo:(FlutterMethodCall*)call
               result:(FlutterResult)result {
     NSString *signature = call.arguments[@"signature"];
     NSString *videoPath = call.arguments[@"videoPath"];
     NSString *coverPath = call.arguments[@"coverPath"];
-    TXUGCPublish *_videoPublish = [[TXUGCPublish alloc] initWithUserID:@"independence_ios"];
-    _videoPublish.delegate = (id)self;
+    
     TXPublishParam *publishParam = [[TXPublishParam alloc] init];
     publishParam.enableHTTPS  = true;
     publishParam.signature  = signature;
@@ -38,7 +56,7 @@
     if(![coverPath isEqual:@""]){
         publishParam.coverPath  = coverPath;
     }
-    int ret = [_videoPublish publishVideo:publishParam];
+    int ret = [_txUgcPublish publishVideo:publishParam];
     result([NSNumber numberWithInt:ret]);
     
 }
@@ -53,7 +71,7 @@
                    @"method": @"publishProgress"
            
        };
-    [[FlutterUgcUploadPluginStream sharedInstance] streamHandler].eventSink(eventData);
+    self->_eventSink(eventData);
 }
 
 - (void)onPublishComplete:(TXPublishResult*)res {
@@ -66,7 +84,17 @@
                            @"coverURL": res.coverURL != nil ? res.coverURL : @"",
                            @"method": @"publishComplete"
        };
-    [[FlutterUgcUploadPluginStream sharedInstance] streamHandler].eventSink(eventData);
+    self->_eventSink(eventData);
+}
+
+- (FlutterError * _Nullable)onCancelWithArguments:(id _Nullable)arguments {
+    _eventSink = nil;
+    return nil;
+}
+
+- (FlutterError * _Nullable)onListenWithArguments:(id _Nullable)arguments eventSink:(nonnull FlutterEventSink)events {
+    _eventSink = events;
+    return nil;
 }
 
 @end

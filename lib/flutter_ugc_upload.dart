@@ -30,7 +30,8 @@ class FlutterUgcUpload {
     return version;
   }
 
-  static Future<int?> uploadVideo(String signature, String videoPath, {String? coverPath = ""}) async {
+  static Future<int?> uploadVideo(String signature, String videoPath,String customKey, {String? coverPath = ""}) async {
+    _channel.invokeMethod('setCustomKey', {'customKey': customKey});
     var arguments = {};
     arguments['signature'] = signature;
     arguments['videoPath'] = videoPath;

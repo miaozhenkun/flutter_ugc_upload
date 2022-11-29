@@ -134,6 +134,7 @@ class _MyAppState extends State<MyApp> {
             Text('Running on: $_platformVersion\n'),
             ElevatedButton(onPressed: () async {
               onVideoRecordButtonPressed();
+              print("开始");
             }, child: const Text("开始录制")),
             ElevatedButton(onPressed: () async {
               onStopButtonPressed();
@@ -142,7 +143,7 @@ class _MyAppState extends State<MyApp> {
               Directory tempDir = await getTemporaryDirectory();
               String tempPath = tempDir.path;
               print(videoPath);
-              int? publishCode = await FlutterUgcUpload.uploadVideo("ZA9cK4ZV92miQRN1i8DlNl0JMDVzZWNyZXRJZD1BS0lEdWQ3S0h4TFRLdUdNQmowMWtDTkh1R0s3U1dLcjc3cUkmY3VycmVudFRpbWVTdGFtcD0xNjY5NjkyMDgxJmV4cGlyZVRpbWU9MzMzOTQ3MDU2MiZyYW5kb209NjIzNDYzMDQyJnZvZFN1YkFwcElkPTE1MDAwMTI2NTMmc3RvcmFnZVJlZ2lvbj1hcC1zaGFuZ2hhaQ==", videoPath);
+              int? publishCode = await FlutterUgcUpload.uploadVideo("signature", videoPath,"flutter");
              print('publishCode');
              print(publishCode);
             }, child: const Text("上传视频video")),

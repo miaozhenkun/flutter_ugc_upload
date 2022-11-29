@@ -24,6 +24,8 @@ public class FlutterUgcUploadPlugin implements FlutterPlugin, MethodCallHandler,
   private static Context mContext;
   private EventChannel eventChannel;
   public static EventChannel.EventSink mEventSink = null;
+  private String customKey;
+  private TXUGCPublish txUgcPublish;
 
   @Override
   public void onAttachedToEngine(@NonNull FlutterPluginBinding flutterPluginBinding) {
@@ -46,7 +48,9 @@ public class FlutterUgcUploadPlugin implements FlutterPlugin, MethodCallHandler,
   public void onMethodCall(@NonNull MethodCall call, @NonNull Result result) {
     if (call.method.equals("getPlatformVersion")) {
       result.success("Android " + android.os.Build.VERSION.RELEASE);
-    } else if(call.method.equals("uploadVideo")){
+    }else if (call.method.equals("setCustomKey")) {
+      setCustomKey(call, result);
+    }else if(call.method.equals("uploadVideo")){
       uploadVideo(call,result);
     } else {
       result.notImplemented();
@@ -58,30 +62,40 @@ public class FlutterUgcUploadPlugin implements FlutterPlugin, MethodCallHandler,
     channel.setMethodCallHandler(null);
   }
 
-  private void uploadVideo(MethodCall call, Result result){
-    TXUGCPublish mVideoPublish = new TXUGCPublish(mContext, "independence_android");
-    mVideoPublish.setListener(new TXUGCPublishTypeDef.ITXVideoPublishListener() {
-      @Override
-      public void onPublishProgress(long uploadBytes, long totalBytes) {
-        Map map =new HashMap();
-        map.put("uploadBytes", uploadBytes);
-        map.put("totalBytes",  totalBytes);
-        map.put("method",  "publishProgress");
-        mEventSink.success(map);
-      }
+  private void setCustomKey(@NonNull MethodCall call, @NonNull Result result) {
+    String customKey = null;
+    if (call.hasArgument("customKey")) {
+      customKey = call.argument("customKey");
+    }
+    if (txUgcPublish == null || (customKey != null && !customKey.equals(this.customKey))) {
+      txUgcPublish = new TXUGCPublish(mContext, customKey);
+      txUgcPublish.setListener(new TXUGCPublishTypeDef.ITXVideoPublishListener() {
+        @Override
+        public void onPublishProgress(long uploadBytes, long totalBytes) {
+          Map map =new HashMap();
+          map.put("uploadBytes", uploadBytes);
+          map.put("totalBytes",  totalBytes);
+          map.put("method",  "publishProgress");
+          mEventSink.success(map);
+        }
+        @Override
+        public void onPublishComplete(TXUGCPublishTypeDef.TXPublishResult res) {
+          Map map = new HashMap();
+          map.put("method",  "publishComplete");
+          map.put("retCode",res.retCode);
+          map.put("descMsg",res.descMsg);
+          map.put("videoId",res.videoId);
+          map.put("videoURL",res.videoURL);
+          map.put("coverURL",res.coverURL);
+          mEventSink.success(map);
+        }
+      });
+    }
+    this.customKey = customKey;
+  }
 
-      @Override
-      public void onPublishComplete(TXUGCPublishTypeDef.TXPublishResult res) {
-        Map map = new HashMap();
-        map.put("method",  "publishComplete");
-        map.put("retCode",res.retCode);
-        map.put("descMsg",res.descMsg);
-        map.put("videoId",res.videoId);
-        map.put("videoURL",res.videoURL);
-        map.put("coverURL",res.coverURL);
-        mEventSink.success(map);
-      }
-    });
+  private void uploadVideo(MethodCall call, Result result){
+
     TXUGCPublishTypeDef.TXPublishParam param = new TXUGCPublishTypeDef.TXPublishParam();
     param.enableHttps = true;
     param.signature = call.argument("signature");
@@ -89,7 +103,7 @@ public class FlutterUgcUploadPlugin implements FlutterPlugin, MethodCallHandler,
     if(call.argument("coverPath")!= "") {
       param.coverPath = call.argument("coverPath");
     }
-    int publishCode = mVideoPublish.publishVideo(param);
+    int publishCode = txUgcPublish.publishVideo(param);
     result.success(publishCode);
   }
 
