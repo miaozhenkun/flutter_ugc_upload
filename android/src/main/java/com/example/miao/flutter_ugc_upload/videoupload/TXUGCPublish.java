@@ -10,12 +10,13 @@ import android.os.Handler;
 import android.text.TextUtils;
 import android.util.Log;
 
-import com.tencent.ugcupload.demo.videoupload.impl.TVCClient;
-import com.tencent.ugcupload.demo.videoupload.impl.TVCConstants;
-import com.tencent.ugcupload.demo.videoupload.impl.TVCUploadInfo;
-import com.tencent.ugcupload.demo.videoupload.impl.TVCUploadListener;
-import com.tencent.ugcupload.demo.videoupload.impl.TVCUtils;
-import com.tencent.ugcupload.demo.videoupload.impl.TXUGCPublishOptCenter;
+
+import com.example.miao.flutter_ugc_upload.videoupload.impl.TVCClient;
+import com.example.miao.flutter_ugc_upload.videoupload.impl.TVCConstants;
+import com.example.miao.flutter_ugc_upload.videoupload.impl.TVCUploadInfo;
+import com.example.miao.flutter_ugc_upload.videoupload.impl.TVCUploadListener;
+import com.example.miao.flutter_ugc_upload.videoupload.impl.TVCUtils;
+import com.example.miao.flutter_ugc_upload.videoupload.impl.TXUGCPublishOptCenter;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -32,7 +33,7 @@ public class TXUGCPublish {
     private              TXUGCPublishTypeDef.ITXVideoPublishListener mListener;
     private              TXUGCPublishTypeDef.ITXMediaPublishListener mMediaListener;
     private              boolean                                     mPublishing;
-    private              TVCClient                                   mTVCClient = null;
+    private TVCClient mTVCClient = null;
     private              String                                      mCustomKey = "";
 
     public TXUGCPublish(Context context, String customKey) {

@@ -18,9 +18,6 @@ class FlutterUgcUpload {
     if (_receiveStream == null) {
       _receiveStream = StreamController();
       _subscription = _onGetResult.listen((Map<String, Object> event) {
-        if (kDebugMode) {
-          print('event----' + event.toString());
-        }
         Map<String, Object> newEvent = Map<String, Object>.of(event);
         _receiveStream?.add(ProgressResult.fromMap(newEvent));
       });
@@ -33,13 +30,13 @@ class FlutterUgcUpload {
     return version;
   }
 
-  static Future<Map?> uploadVideo(String signature, String videoPath, {String? coverPath = ""}) async {
+  static Future<int?> uploadVideo(String signature, String videoPath, {String? coverPath = ""}) async {
     var arguments = {};
     arguments['signature'] = signature;
     arguments['videoPath'] = videoPath;
     arguments['coverPath'] = coverPath;
-    Map map = await _channel.invokeMethod('uploadVideo', arguments);
-    return map;
+    int publishCode = await _channel.invokeMethod('uploadVideo', arguments);
+    return publishCode;
   }
 }
 
@@ -56,4 +53,18 @@ class ProgressResult {
   factory ProgressResult.fromMap(Map<dynamic, dynamic> map) =>
       ProgressResult(map['uploadBytes'], map['totalBytes'], map['retCode'], map['descMsg'], map['videoId'], map['videoURL'], map['coverURL'],
           method: map['method']);
+
+  Map<String, dynamic> toJson() {
+    final Map<String, dynamic> data = new Map<String, dynamic>();
+    data['method'] = method;
+    data['uploadBytes'] = uploadBytes;
+    data['totalBytes'] = totalBytes;
+    data['retCode'] = retCode;
+    data['descMsg'] = descMsg;
+    data['videoId'] = videoId;
+    data['videoURL'] = videoURL;
+    data['coverURL'] = coverURL;
+    return data;
+  }
+
 }

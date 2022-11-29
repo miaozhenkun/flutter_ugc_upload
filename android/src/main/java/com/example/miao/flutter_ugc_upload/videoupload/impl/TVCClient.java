@@ -9,6 +9,9 @@ import android.os.Handler;
 import android.text.TextUtils;
 import android.util.Log;
 
+import com.example.miao.flutter_ugc_upload.videoupload.TXUGCPublishTypeDef;
+import com.example.miao.flutter_ugc_upload.videoupload.impl.compute.TXHttpTaskMetrics;
+import com.example.miao.flutter_ugc_upload.videoupload.impl.compute.TXOnGetHttpTaskMetrics;
 import com.tencent.cos.xml.CosXmlService;
 import com.tencent.cos.xml.CosXmlServiceConfig;
 import com.tencent.cos.xml.exception.CosXmlClientException;
@@ -25,9 +28,6 @@ import com.tencent.cos.xml.transfer.TransferConfig;
 import com.tencent.cos.xml.transfer.TransferManager;
 import com.tencent.cos.xml.transfer.TransferState;
 import com.tencent.cos.xml.transfer.TransferStateListener;
-import com.tencent.ugcupload.demo.videoupload.TXUGCPublishTypeDef;
-import com.tencent.ugcupload.demo.videoupload.impl.compute.TXHttpTaskMetrics;
-import com.tencent.ugcupload.demo.videoupload.impl.compute.TXOnGetHttpTaskMetrics;
 
 import org.json.JSONException;
 import org.json.JSONObject;

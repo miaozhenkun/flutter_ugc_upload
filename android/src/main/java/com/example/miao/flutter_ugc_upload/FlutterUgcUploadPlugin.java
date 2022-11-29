@@ -73,16 +73,17 @@ public class FlutterUgcUploadPlugin implements FlutterPlugin, MethodCallHandler,
       @Override
       public void onPublishComplete(TXUGCPublishTypeDef.TXPublishResult res) {
         Map map = new HashMap();
+        map.put("method",  "publishComplete");
         map.put("retCode",res.retCode);
         map.put("descMsg",res.descMsg);
         map.put("videoId",res.videoId);
         map.put("videoURL",res.videoURL);
         map.put("coverURL",res.coverURL);
-        map.put("method",  "publishComplete");
         mEventSink.success(map);
       }
     });
     TXUGCPublishTypeDef.TXPublishParam param = new TXUGCPublishTypeDef.TXPublishParam();
+    param.enableHttps = true;
     param.signature = call.argument("signature");
     param.videoPath = call.argument("videoPath");
     if(call.argument("coverPath")!= "") {

@@ -3,7 +3,8 @@ package com.example.miao.flutter_ugc_upload.videoupload.impl;
 import android.text.TextUtils;
 import android.util.Log;
 
-import com.tencent.ugcupload.demo.videoupload.impl.compute.TXOkHTTPEventListener;
+
+import com.example.miao.flutter_ugc_upload.videoupload.impl.compute.TXOkHTTPEventListener;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -28,7 +29,7 @@ public class UGCClient {
     private final static String                TAG      = "TVC-UGCClient";
     private              String                signature;
     private              OkHttpClient          okHttpClient;
-    private              TXOkHTTPEventListener mTXOkHTTPEventListener;
+    private TXOkHTTPEventListener mTXOkHTTPEventListener;
     private              String                serverIP = "";
     private static       UGCClient             ourInstance;
 

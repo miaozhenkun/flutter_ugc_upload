@@ -26,20 +26,20 @@
 
 - (void) uploadVideo:(FlutterMethodCall*)call
               result:(FlutterResult)result {
-    
-    NSLog(@"执行了uploadVideo 方法");
     NSString *signature = call.arguments[@"signature"];
     NSString *videoPath = call.arguments[@"videoPath"];
     NSString *coverPath = call.arguments[@"coverPath"];
     TXUGCPublish *_videoPublish = [[TXUGCPublish alloc] initWithUserID:@"independence_ios"];
     _videoPublish.delegate = (id)self;
     TXPublishParam *publishParam = [[TXPublishParam alloc] init];
+    publishParam.enableHTTPS  = true;
     publishParam.signature  = signature;
     publishParam.videoPath  = videoPath;
     if(![coverPath isEqual:@""]){
         publishParam.coverPath  = coverPath;
     }
-    [_videoPublish publishVideo:publishParam];
+    int ret = [_videoPublish publishVideo:publishParam];
+    result([NSNumber numberWithInt:ret]);
     
 }
 

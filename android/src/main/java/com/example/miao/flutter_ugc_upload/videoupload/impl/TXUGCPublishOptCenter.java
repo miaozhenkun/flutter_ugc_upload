@@ -5,15 +5,16 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
-import android.support.annotation.NonNull;
 import android.text.TextUtils;
 import android.util.Log;
 
 
+import androidx.annotation.NonNull;
+
+import com.tencent.qcloud.quic.BuildConfig;
 import com.tencent.qcloud.quic.QuicConfig;
 import com.tencent.qcloud.quic.QuicNative;
 import com.tencent.qcloud.quic.QuicProxy;
-import com.tencent.ugcupload.demo.BuildConfig;
 
 import org.json.JSONArray;
 import org.json.JSONException;
