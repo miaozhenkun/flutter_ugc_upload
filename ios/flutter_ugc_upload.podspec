@@ -16,8 +16,10 @@ flutter_ugc_upload
   s.source_files = 'Classes/**/*'
   s.public_header_files = 'Classes/**/*.h'
   s.dependency 'Flutter'
-  s.dependency 'QCloudQuic/Slim'
-  s.dependency 'AFNetworking'
+  s.dependency 'AFNetworking','4.0.1'
+  s.dependency 'QCloudCOSXML/Slim','6.5.1'
+  s.dependency 'QCloudQuic','6.3.9'
+
   s.static_framework = true
   s.frameworks = 'CoreTelephony','Foundation','SystemConfiguration'
   s.libraries = 'c++'

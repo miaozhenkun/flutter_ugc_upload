@@ -7,3 +7,6 @@
 ## 0.0.3
 
 * TODO: flutter_ugc_upload 处理Ios 第一次失败bug。
+## 0.0.4
+
+* TODO: 升级ios依赖

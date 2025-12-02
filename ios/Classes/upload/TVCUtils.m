@@ -18,9 +18,14 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+#import "TVCLog.h"
 
+// UNKNOWN_DEVICE_MODEL = "unknown";
+
+static NSString * const kUnKnownDeviceModel = @"unknown";
 static NSString * const kTVCPDDictionaryKey = @"com.tencent.liteavupload.uuidDictionaryKey";
 static NSString * const kTVCPDKeyChainKey = @"com.tencent.liteavupload.uuidkeychainKey";
+static NSString * kDeviceModel = nil;
 
 @implementation TVCUtils
 
@@ -217,7 +222,7 @@ static NSString *tvc_combineTwoFingerPrint(unsigned char *fp1,unsigned char *fp2
         @try {
             ret = [NSKeyedUnarchiver unarchiveObjectWithData:(__bridge NSData *)keyData];
         } @catch (NSException *e) {
-            NSLog(@"Unarchive of %@ failed: %@", kTVCPDKeyChainKey, e);
+            VodLogError(@"Unarchive of %@ failed: %@", kTVCPDKeyChainKey, e);
         } @finally {
         }
     }
@@ -254,8 +259,9 @@ static NSString *tvc_combineTwoFingerPrint(unsigned char *fp1,unsigned char *fp2
 + (int) tvc_getNetWorkType
 {
     int NetworkType = 0; // UNKNOWN
-    
-    //创建零地址，0.0.0.0的地址表示查询本机的网络连接状态
+    // Create a zero address, the address of 0.0.0.0 indicates querying the network
+    // connection status of the local machine
+    // 创建零地址，0.0.0.0的地址表示查询本机的网络连接状态
     struct sockaddr_storage zeroAddress;
     
     bzero(&zeroAddress, sizeof(zeroAddress));
@@ -266,11 +272,13 @@ static NSString *tvc_combineTwoFingerPrint(unsigned char *fp1,unsigned char *fp2
     SCNetworkReachabilityRef defaultRouteReachability = SCNetworkReachabilityCreateWithAddress(NULL, (struct sockaddr *)&zeroAddress);
     SCNetworkReachabilityFlags flags;
     
-    //获得连接的标志
+    // Get connection flags
+    // 获得连接的标志
     BOOL didRetrieveFlags = SCNetworkReachabilityGetFlags(defaultRouteReachability, &flags);
     CFRelease(defaultRouteReachability);
     
-    //如果不能获取连接标志，则不能连接网络，直接返回
+    // If the connection flag cannot be obtained, the network cannot be connected and return directly
+    // 如果不能获取连接标志，则不能连接网络，直接返回
     if (!didRetrieveFlags)
     {
         return NetworkType;
@@ -359,11 +367,21 @@ static NSString *tvc_combineTwoFingerPrint(unsigned char *fp1,unsigned char *fp2
 
 + (NSString *)tvc_deviceModelName
 {
+    if (!kDeviceModel || kDeviceModel.length == 0) {
+        kDeviceModel = [self tvc_deviceModelNameBySys];
+        if (!kDeviceModel || kDeviceModel.length == 0) {
+            kDeviceModel = kUnKnownDeviceModel;
+        }
+    }
+    return kDeviceModel;
+}
+
++ (NSString *)tvc_deviceModelNameBySys {
     struct utsname systemInfo;
     uname(&systemInfo);
     NSString *deviceModel = [NSString stringWithCString:systemInfo.machine encoding:NSUTF8StringEncoding];
     
-    //iPhone 系列
+    // iPhone series
     if ([deviceModel isEqualToString:@"iPhone1,1"])    return @"iPhone 1G";
     if ([deviceModel isEqualToString:@"iPhone1,2"])    return @"iPhone 3G";
     if ([deviceModel isEqualToString:@"iPhone2,1"])    return @"iPhone 3GS";
@@ -385,14 +403,14 @@ static NSString *tvc_combineTwoFingerPrint(unsigned char *fp1,unsigned char *fp2
     if ([deviceModel isEqualToString:@"iPhone9,2"])    return @"iPhone 7 Plus (CDMA)";
     if ([deviceModel isEqualToString:@"iPhone9,4"])    return @"iPhone 7 Plus (GSM)";
     
-    //iPod 系列
+    // iPod series
     if ([deviceModel isEqualToString:@"iPod1,1"])      return @"iPod Touch 1G";
     if ([deviceModel isEqualToString:@"iPod2,1"])      return @"iPod Touch 2G";
     if ([deviceModel isEqualToString:@"iPod3,1"])      return @"iPod Touch 3G";
     if ([deviceModel isEqualToString:@"iPod4,1"])      return @"iPod Touch 4G";
     if ([deviceModel isEqualToString:@"iPod5,1"])      return @"iPod Touch 5G";
     
-    //iPad 系列
+    // iPad series
     if ([deviceModel isEqualToString:@"iPad1,1"])      return @"iPad";
     if ([deviceModel isEqualToString:@"iPad2,1"])      return @"iPad 2 (WiFi)";
     if ([deviceModel isEqualToString:@"iPad2,2"])      return @"iPad 2 (GSM)";
@@ -424,8 +442,41 @@ static NSString *tvc_combineTwoFingerPrint(unsigned char *fp1,unsigned char *fp2
     if ([deviceModel isEqualToString:@"iPad4,7"]
         ||[deviceModel isEqualToString:@"iPad4,8"]
         ||[deviceModel isEqualToString:@"iPad4,9"])      return @"iPad mini 3";
-    
     return deviceModel;
 }
+
++ (id)findObj:(NSDictionary*)dic withKey:(NSString*)key withClass:(Class)claz withDet:(id)obj {
+    id value = [self findObj:dic withKey:key withClass:claz];
+    return value ? value : obj;
+}
+
++ (id)findObj:(NSDictionary*)dic withKey:(NSString*)key withClass:(Class)claz {
+    if (dic[key] && [dic[key]isKindOfClass: claz]) {
+        return dic[key];
+    }
+    return nil;
+}
+
++ (id)findObjForce:(NSDictionary*)dic withKey:(NSString*)key withClass:(Class)claz {
+    if (dic[key] && [dic[key]isKindOfClass: claz]) {
+        return dic[key];
+    }
+    @throw [NSException exceptionWithName:NSInvalidArgumentException reason:[NSString stringWithFormat:@"no value for %@", key] userInfo:@{}];
+}
+
++ (BOOL)isEmptyString:(NSString *)aStr {
+    if (!aStr || aStr == NULL) {
+        return YES;
+    }
+    if ([aStr isKindOfClass:[NSNull class]]) {
+        return YES;
+    }
+    if (!aStr.length) {
+        return YES;
+    }
+    
+    return NO;
+}
+
 @end
 

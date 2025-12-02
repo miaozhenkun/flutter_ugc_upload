@@ -34,6 +34,8 @@
 +(void)save:(UIImage*)uiImage ToPath:(NSString*)path;
 
 +(UIImage *)loadThumbNail:(NSURL *)urlVideo;
+
++(NSString *)getFileMD5StrFromPath:(NSString *)path;
 @end
 
 #endif /* TXUGCUtil_h */

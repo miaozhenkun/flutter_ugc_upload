@@ -7,6 +7,7 @@
 //
 
 #import "TVCClientInner.h"
+#import "TVCLog.h"
 
 @implementation TVCUGCResult
 
@@ -23,13 +24,16 @@
         _videoSign = @"";
         _imageSign = @"";
         _uploadSession = @"";
+        _uploadRegion = @"";
+        _domain = @"";
+        _useCosAcc = 0;
+        _uploadDomain = @"";
+        _cosAccDomain = @"";
         _userAppid = @"";
         _tmpSecretId = @"";
         _tmpSecretKey = @"";
         _tmpToken = @"";
         _tmpExpiredTime = 0;
-        _useCosAcc = 0;
-        _cosAccDomain = @"";
         _currentTS = 0;
     }
     return self;
@@ -46,7 +50,7 @@
 
 - (void)dealloc
 {
-    NSLog(@"dealloc TVCUploadContext");
+    VodLogInfo(@"dealloc TVCUploadContext");
 }
 
 - (instancetype)init
@@ -66,6 +70,7 @@
         _resumeData = nil;
         _vodCmdRequestCount = 0;
         _mainVodServerErrMsg = @"";
+        _isQuic = NO;
     }
     return self;
 }
@@ -107,6 +112,21 @@
         _retryCount = 0;
         _reporting = NO;
         _requestId = @"";
+    }
+    return self;
+}
+
+@end
+
+@implementation ResumeCacheData
+
+- (instancetype)init
+{
+    if (self = [super init]) {
+        self.resumeData = nil;
+        self.vodSessionKey = nil;
+        self.videoLastModTime = 0;
+        self.coverLastModTime = 0;
     }
     return self;
 }

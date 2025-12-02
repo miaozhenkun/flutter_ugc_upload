@@ -7,7 +7,6 @@
 //
 
 #import <Foundation/Foundation.h>
-#import "QuicClient.h"
 
 typedef void (^TXUGCPrepareUploadCompletion)();
 
@@ -27,7 +26,8 @@ typedef void (^TXUGCPrepareUploadCompletion)();
 @property(strong, nonatomic) NSMutableDictionary *publishingList;
 @property(strong, nonatomic) TXUGCCosRegionInfo *cosRegionInfo;
 @property(nonatomic, assign) UInt64 minCosRespTime;
-@property(nonatomic, strong) QuicClient *quicClient;
+@property(nonatomic, strong) NSRegularExpression *regexIpv4;
+@property(nonatomic, strong) NSRegularExpression *regexIpv6;
 
 - (void)prepareUpload:(NSString *)signature
     prepareUploadComplete:(TXUGCPrepareUploadCompletion)prepareUploadComplete;
@@ -39,5 +39,7 @@ typedef void (^TXUGCPrepareUploadCompletion)();
 - (void)addPublishing:(NSString *)videoPath;
 - (void)delPublishing:(NSString *)videoPath;
 - (BOOL)isPublishingPublishing:(NSString *)videoPath;
+- (BOOL)isNeedEnableQuic:(NSString *)region;
+- (void)disableQuicIfNeed;
 
 @end

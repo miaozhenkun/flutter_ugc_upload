@@ -1,10 +1,12 @@
 #import "TXUGCPublish.h"
 #import "TVCHeader.h"
-//#import "log.h"
-//#import "TXRTMPAPI.h"
 #import "TVCClient.h"
 #import "TXUGCPublishOptCenter.h"
 #import "TXUGCPublishUtil.h"
+#import "UploadResumeDefaultController.h"
+#import "TVCConfig.h"
+#import "TVCLog.h"
+#import "TVCReport.h"
 
 #undef _MODULE_
 #define _MODULE_ "TXUGCPublish"
@@ -42,6 +44,8 @@
     TVCUploadParam *_tvcParam;
     TVCClient *_tvcClient;
     NSString *_userID;
+    NSString *_uploadKey;
+    BOOL _isCancel;
 }
 
 @property(nonatomic, assign) BOOL publishing;
@@ -54,6 +58,9 @@
     self = [super init];
     if (self != nil) {
         _userID = @"";
+        _isCancel = NO;
+        _uploadKey = @"";
+        [self setIsDebug:true];
     }
     return self;
 }
@@ -62,15 +69,42 @@
     self = [super init];
     if (self != nil) {
         _userID = userID;
+        _isCancel = NO;
+        _uploadKey = @"";
     }
     return self;
 }
 
+- (id)initWithUploadKey:(NSString *)uploadKey {
+    self = [super init];
+    if (self != nil) {
+        _userID = @"";
+        _isCancel = NO;
+        _uploadKey = uploadKey;
+    }
+    return self;
+}
+
+- (id)initWithUserID:(NSString *)userID withUploadKey:(NSString *)uploadKey {
+    self = [super init];
+    if (self != nil) {
+        _userID = userID;
+        _isCancel = NO;
+        _uploadKey = uploadKey;
+    }
+    return self;
+}
+
+- (void)setIsDebug:(_Bool)isDebug {
+    [[TVCLog sharedLogger] setLogLevel: isDebug ? QCloudLogLevelVerbose : QCloudLogLevelNone];
+}
+
 - (int)publishVideoImpl:(TXPublishParam *)param {
+    VodLogInfo(@"start publishVideoImpl");
     if (param.videoPath == nil || param.videoPath.length == 0 ||
         [[NSFileManager defaultManager] fileExistsAtPath:param.videoPath] == NO) {
-        NSLog(@"publishVideo: invalid video file");
-        return -5;
+        VodLogError(@"publishVideo: invalid video file");
+        return TVC_ERR_INVALID_VIDEOPATH;
     }
     _tvcConfig = [[TVCConfig alloc] init];
     _tvcConfig.signature = param.signature;
@@ -79,7 +113,12 @@
     _tvcConfig.enableResume = param.enableResume;
     _tvcConfig.sliceSize = param.sliceSize;
     _tvcConfig.concurrentCount = param.concurrentCount;
-    //_tvcConfig.cosRegion = param.cosRegion;
+    _tvcConfig.trafficLimit = param.trafficLimit;
+    if(param.uploadResumController != nil) {
+        _tvcConfig.uploadResumController = param.uploadResumController;
+    } else {
+        _tvcConfig.uploadResumController = [[UploadResumeDefaultController alloc] init];
+    }
 
     _tvcParam = [[TVCUploadParam alloc] init];
 
@@ -92,20 +131,24 @@
     __weak __typeof(self) weakSelf = self;
 
     if (_tvcClient == nil) {
-        _tvcClient = [[TVCClient alloc] initWithConfig:_tvcConfig];
+        _tvcClient = [[TVCClient alloc] initWithConfig:_tvcConfig uploadSesssionKey:_uploadKey];
     } else {
+        [_tvcClient updateConfig:_tvcConfig];
         [[TXUGCPublishOptCenter shareInstance] updateSignature:param.signature];
     }
 
+    long publishStartTime = [[NSDate date] timeIntervalSince1970];
     [_tvcClient uploadVideo:_tvcParam
         result:^(TVCUploadResponse *resp) {
+          VodLogInfo(@"uploadCostTime:%f", ([[NSDate date] timeIntervalSince1970] - publishStartTime));
           __strong __typeof(weakSelf) self = weakSelf;
           if (self == nil) {
+              VodLogError(@"weakSelf release");
               return;
           }
 
           if (resp) {
-              NSLog(@"publish video result: retCode = %d descMsg = %s videoId = %s videoUrl = %s "
+              VodLogInfo(@"publish video result: retCode = %d descMsg = %s videoId = %s videoUrl = %s "
                     @"coverUrl = %s",
                     resp.retCode, [resp.descMsg UTF8String], [resp.videoId UTF8String],
                     [resp.videoURL UTF8String], [resp.coverURL UTF8String]);
@@ -139,48 +182,69 @@
 }
 
 - (int)publishVideo:(TXPublishParam *)param {
+    VodLogInfo(@"vodPublish version:%@", TVCVersion);
     if (_publishing == YES) {
-        // NSLog(@"there is existing uncompleted publish task");
-        return -1;
+        VodLogError(@"there is existing uncompleted publish task");
+        return TVC_ERR_ERR_UGC_PUBLISHING;
     }
 
     if (param == nil) {
-        NSLog(@"publishVideo: invalid param");
-        return -2;
+        VodLogError(@"publishVideo: invalid param");
+        return TVC_ERR_UGC_INVALID_PARAME;
     }
 
     if (param.signature == nil || param.signature.length == 0) {
-        NSLog(@"publishVideo: invalid signature");
-        return -4;
+        VodLogError(@"publishVideo: invalid signature");
+        return TVC_ERR_INVALID_SIGNATURE;
     }
 
     _publishing = YES;
+    _isCancel = NO;
 
     if (param.enablePreparePublish) {
         __weak typeof(self) weakSelf = self;
         [[TXUGCPublishOptCenter shareInstance] prepareUpload:param.signature
                                        prepareUploadComplete:^{
-                                         __strong __typeof(weakSelf) self = weakSelf;
-                                         if (self != nil) {
-                                             int ret = [self publishVideoImpl:param];
-                                             self->_publishing = (ret == 0);
-                                         } else {
-                                         }
-                                       }];
+            VodLogInfo(@"prepareUploadComplete");
+            __strong __typeof(weakSelf) self = weakSelf;
+            if (self->_isCancel) {
+                self->_isCancel = NO;
+                self->_publishing = NO;
+                VodLogWarning(@"upload is cancel after prepare upload");
+                [self callbackErrorComplete:TVC_ERR_USER_CANCLE msg:@"upload video, user cancled"];
+                return;
+            }
+            if (self != nil) {
+                int ret = [self publishVideoImpl:param];
+                if (ret != TVC_OK) {
+                    VodLogError(@"upload params check failed:%i", ret);
+                    [self callbackErrorComplete:ret msg:@"upload params check failed"];
+                } else {
+                    self->_publishing = YES;
+                }
+            } else {
+                VodLogError(@"weak self release");
+            }
+        }];
         return 0;
     } else {
         [[TXUGCPublishOptCenter shareInstance] prepareUpload:param.signature
                                        prepareUploadComplete:nil];
         int ret = [self publishVideoImpl:param];
-        _publishing = (ret == 0);
+        if (ret != TVC_OK) {
+            VodLogError(@"upload params check failed:%i", ret);
+            [self callbackErrorComplete:ret msg:@"upload params check failed"];
+        } else {
+            self->_publishing = YES;
+        }
         return ret;
     }
 }
 - (int)publishMediaImpl:(TXMediaPublishParam *)param {
     if (param.mediaPath == nil || param.mediaPath.length == 0 ||
         [[NSFileManager defaultManager] fileExistsAtPath:param.mediaPath] == NO) {
-        NSLog(@"publishMedia: invalid video file");
-        return -5;
+        VodLogError(@"publishMedia: invalid video file");
+        return TVC_ERR_INVALID_VIDEOPATH;
     }
 
     _tvcConfig = [[TVCConfig alloc] init];
@@ -190,27 +254,37 @@
     _tvcConfig.enableResume = param.enableResume;
     _tvcConfig.sliceSize = param.sliceSize;
     _tvcConfig.concurrentCount = param.concurrentCount;
-    //_tvcConfig.cosRegion = param.cosRegion;
+    _tvcConfig.trafficLimit = param.trafficLimit;
+    if(param.uploadResumController != nil) {
+        _tvcConfig.uploadResumController = param.uploadResumController;
+    } else {
+        _tvcConfig.uploadResumController = [[UploadResumeDefaultController alloc] init];
+    }
+
 
     _tvcParam = [[TVCUploadParam alloc] init];
 
     _tvcParam.videoPath = param.mediaPath;
 
-    //    _tvcParam.coverPath = param.coverPath;
-
     _tvcParam.videoName = param.fileName;
-
     __weak __typeof(self) weakSelf = self;
-    _tvcClient = [[TVCClient alloc] initWithConfig:_tvcConfig];
+    if (_tvcClient == nil) {
+        _tvcClient = [[TVCClient alloc] initWithConfig:_tvcConfig uploadSesssionKey:_uploadKey];
+    } else {
+        [_tvcClient updateConfig:_tvcConfig];
+        [[TXUGCPublishOptCenter shareInstance] updateSignature:param.signature];
+    }
+    long publishStartTime = [[NSDate date] timeIntervalSince1970];
     [_tvcClient uploadVideo:_tvcParam
         result:^(TVCUploadResponse *resp) {
+          VodLogInfo(@"uploadCostTime:%f", ([[NSDate date] timeIntervalSince1970] - publishStartTime));
           __strong __typeof(weakSelf) self = weakSelf;
           if (self == nil) {
               return;
           }
 
           if (resp) {
-              NSLog(@"publish media result: retCode = %d descMsg = %s mediaId = %s mediaUrl = %s",
+              VodLogInfo(@"publish media result: retCode = %d descMsg = %s mediaId = %s mediaUrl = %s",
                     resp.retCode, [resp.descMsg UTF8String], [resp.videoId UTF8String],
                     [resp.videoURL UTF8String]);
 
@@ -241,30 +315,45 @@
 }
 
 - (int)publishMedia:(TXMediaPublishParam *)param {
+    VodLogInfo(@"vodPublish version:%@", TVCVersion);
     if (_publishing == YES) {
-        // NSLog(@"there is existing uncompleted publish task");
-        return -1;
+        VodLogError(@"there is existing uncompleted publish task");
+        return TVC_ERR_ERR_UGC_PUBLISHING;
     }
 
     if (param == nil) {
-        NSLog(@"publishMedia: invalid param");
-        return -2;
+        VodLogError(@"publishVideo: invalid param");
+        return TVC_ERR_UGC_INVALID_PARAME;
     }
 
     if (param.signature == nil || param.signature.length == 0) {
-        NSLog(@"publishMedia: invalid signature");
-        return -4;
+        VodLogError(@"publishVideo: invalid signature");
+        return TVC_ERR_INVALID_SIGNATURE;
     }
 
     _publishing = YES;
+    _isCancel = NO;
     if (param.enablePreparePublish) {
         __weak typeof(self) weakSelf = self;
         [[TXUGCPublishOptCenter shareInstance] prepareUpload:param.signature
                                        prepareUploadComplete:^{
+                                        VodLogInfo(@"prepareUploadComplete");
                                          __strong __typeof(weakSelf) self = weakSelf;
+                                        if (self->_isCancel) {
+                                            self->_isCancel = NO;
+                                            self->_publishing = NO;
+                                            VodLogWarning(@"upload is cancel after prepare upload");
+                                            [self callbackErrorComplete:TVC_ERR_USER_CANCLE msg:@"upload media, user cancled"];
+                                            return;
+                                        }
                                          if (self != nil) {
                                              int ret = [self publishMediaImpl:param];
-                                             self->_publishing = (ret == 0);
+                                             if (ret != TVC_OK) {
+                                                 VodLogError(@"upload params check failed:%i", ret);
+                                                 [self callbackErrorComplete:ret msg:@"upload params check failed"];
+                                             } else {
+                                                 self->_publishing = YES;
+                                             }
                                          }
                                        }];
 
@@ -273,22 +362,25 @@
         [[TXUGCPublishOptCenter shareInstance] prepareUpload:param.signature
                                        prepareUploadComplete:nil];
         int ret = [self publishMediaImpl:param];
-        _publishing = (ret == 0);
+        if (ret != TVC_OK) {
+            VodLogError(@"upload params check failed:%i", ret);
+            [self callbackErrorComplete:ret msg:@"upload params check failed"];
+        } else {
+            self->_publishing = YES;
+        }
         return ret;
     }
 
-    return 0;
+    return TVC_OK;
 }
 
 /*
- * ȡ�����Ƶ����
- * ����ֵ��
- *      YES �ɹ���
- *      NO ʧ�ܣ�
  -(BOOL) canclePublish;
  */
 - (BOOL)canclePublish {
+    VodLogInfo(@"call canclePublish");
     BOOL result = NO;
+    _isCancel = YES;
     if (_tvcClient != nil) {
         result = [_tvcClient cancleUploadVideo];
     }
@@ -304,7 +396,8 @@
     }
 }
 
-/*
+/**
+ * Get report information.
  * 获取上报信息
  */
 - (NSDictionary *)getStatusInfo {
@@ -312,6 +405,40 @@
         return [_tvcClient getStatusInfo];
     }
     return nil;
+}
+
+- (void)notifyResult:(TXPublishResult *)result {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if(self.delegate) {
+            [self.delegate onPublishComplete:result];
+        }
+    });
+}
+
+- (void)callbackErrorComplete:(int)code msg:(NSString*)msg {
+    self.publishing = NO;
+    TXPublishResult *result = [[TXPublishResult alloc] init];
+    result.retCode = code;
+    result.descMsg = msg;
+    [self notifyResult:result];
+}
+
++ (void)setEnvConfig:(TXUploadEnv)envType {
+    if (envType == ENV_DOMESTIC) {
+        txUploadEvnType = envType;
+        VOD_SERVER_HOST = VOD_SERVER_DOMESTIC_HOST;
+        VOD_SERVER_HOST_BAK = VOD_SERVER_DOMESTIC_HOST_BAK;
+        TXUPLOAD_REPORT_URL = VOD_REPORT_DOMESTIC_HOST;
+        TXUPLOAD_REPORT_URL_BAK = VOD_REPORT_DOMESTIC_HOST_BAK;
+    } else if (envType == ENV_INTL) {
+        txUploadEvnType = envType;
+        VOD_SERVER_HOST = VOD_SERVER_INTL_HOST;
+        VOD_SERVER_HOST_BAK = VOD_SERVER_INTL_HOST_BAK;
+        TXUPLOAD_REPORT_URL = VOD_REPORT_INTL;
+        TXUPLOAD_REPORT_URL_BAK = VOD_REPORT_INTL_BAK;
+    } else {
+        VodLogError(@"unknown env type: %d", envType);
+    }
 }
 
 @end

@@ -9,19 +9,29 @@
 #import "TXUGCPublishOptCenter.h"
 #import <Foundation/Foundation.h>
 #import <SystemConfiguration/CaptiveNetwork.h>
-#import "AFNetworkReachabilityManager.h"
+#import <AFNetworking/AFNetworkReachabilityManager.h>
 #import "TVCClientInner.h"
 #import "TVCCommon.h"
 #import "TVCReport.h"
-#import "AppLocalized.h"
+#include <arpa/inet.h>
+#include <netdb.h>
+#import "TVCLog.h"
+#import "QuicClient.h"
+#import "TVCQuicConfigProxy.h"
+#import "TVCHttpMessageURLProtocol.h"
 
-#define HTTPDNS_SERVER @"https://119.29.29.99/d?dn="  // httpdns服务器
+#define PATTERN_IP_V4 @"^(\\d|[1-9]\\d|1\\d{2}|2[0-4]\\d|25[0-5])(\\.(\\d|[1-9]\\d|1\\d{2}|2[0-4]\\d|25[0-5])){3}$"
+#define PATTERN_IP_V6 @"^((([0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4})|(([0-9A-Fa-f]{1,4}:){1,7}:)|(([0-9A-Fa-f]{1,4}:){6}:[0-9A-Fa-f]{1,4})|(([0-9A-Fa-f]{1,4}:){5}(:[0-9A-Fa-f]{1,4}){1,2})|(([0-9A-Fa-f]{1,4}:){4}(:[0-9A-Fa-f]{1,4}){1,3})|(([0-9A-Fa-f]{1,4}:){3}(:[0-9A-Fa-f]{1,4}){1,4})|(([0-9A-Fa-f]{1,4}:){2}(:[0-9A-Fa-f]{1,4}){1,5})|([0-9A-Fa-f]{1,4}:(:[0-9A-Fa-f]{1,4}){1,6})|(:(:[0-9A-Fa-f]{1,4}){1,7})|(([0-9A-Fa-f]{1,4}:){6}(\\d|[1-9]\\d|1\\d{2}|2[0-4]\\d|25[0-5])(\\.(\\d|[1-9]\\d|1\\d{2}|2[0-4]\\d|25[0-5])){3})|(([0-9A-Fa-f]{1,4}:){5}:(\\d|[1-9]\\d|1\\d{2}|2[0-4]\\d|25[0-5])(\\.(\\d|[1-9]\\d|1\\d{2}|2[0-4]\\d|25[0-5])){3})|(([0-9A-Fa-f]{1,4}:){4}(:[0-9A-Fa-f]{1,4}){0,1}:(\\d|[1-9]\\d|1\\d{2}|2[0-4]\\d|25[0-5])(\\.(\\d|[1-9]\\d|1\\d{2}|2[0-4]\\d|25[0-5])){3})|(([0-9A-Fa-f]{1,4}:){3}(:[0-9A-Fa-f]{1,4}){0,2}:(\\d|[1-9]\\d|1\\d{2}|2[0-4]\\d|25[0-5])(\\.(\\d|[1-9]\\d|1\\d{2}|2[0-4]\\d|25[0-5])){3})|(([0-9A-Fa-f]{1,4}:){2}(:[0-9A-Fa-f]{1,4}){0,3}:(\\d|[1-9]\\d|1\\d{2}|2[0-4]\\d|25[0-5])(\\.(\\d|[1-9]\\d|1\\d{2}|2[0-4]\\d|25[0-5])){3})|([0-9A-Fa-f]{1,4}:(:[0-9A-Fa-f]{1,4}){0,4}:(\\d|[1-9]\\d|1\\d{2}|2[0-4]\\d|25[0-5])(\\.(\\d|[1-9]\\d|1\\d{2}|2[0-4]\\d|25[0-5])){3})|(:(:[0-9A-Fa-f]{1,4}){0,5}:(\\d|[1-9]\\d|1\\d{2}|2[0-4]\\d|25[0-5])(\\.(\\d|[1-9]\\d|1\\d{2}|2[0-4]\\d|25[0-5])){3}))$"
+
+#define HTTPDNS_SERVER @"https://119.29.29.99/d?dn="
 #define HTTPDNS_TOKEN @"800654663"
 
 typedef void (^TXUGCCompletion)(int result);
 typedef void (^TXUGCHttpCompletion)(NSData *_Nullable data, int errCode);
 
 static TXUGCPublishOptCenter *_shareInstance = nil;
+static BOOL gEnableQuic = YES;
+
 
 @implementation TXUGCCosRegionInfo
 
@@ -30,9 +40,17 @@ static TXUGCPublishOptCenter *_shareInstance = nil;
     if (self) {
         _region = @"";
         _domain = @"";
+        _isQuic = NO;
     }
     return self;
 }
+
+@end
+
+@interface TXUGCPublishOptCenter()
+
+@property (nonatomic, strong) NSMutableArray *quicClientList;
+@property (nonatomic, strong) TVCQuicConfigProxy* quicProxy;
 
 @end
 
@@ -54,8 +72,12 @@ static TXUGCPublishOptCenter *_shareInstance = nil;
         _publishingList = [[NSMutableDictionary alloc] init];
         _isStarted = NO;
         _signature = @"";
+        _quicClientList = [[NSMutableArray alloc] init];
         _cosRegionInfo = [[TXUGCCosRegionInfo alloc] init];
+        self.quicProxy = [[TVCQuicConfigProxy alloc] init];
         [self monitorNetwork];
+        _regexIpv4 = [NSRegularExpression regularExpressionWithPattern:PATTERN_IP_V4 options:0 error:nil];
+        _regexIpv6 = [NSRegularExpression regularExpressionWithPattern:PATTERN_IP_V6 options:0 error:nil];
     }
     return self;
 }
@@ -70,6 +92,7 @@ static TXUGCPublishOptCenter *_shareInstance = nil;
     if (ret) {
         _isStarted = YES;
     } else {
+        VodLogInfo(@"preUpload is already loading/init/failed, callback it");
         if (prepareUploadComplete) {
             prepareUploadComplete();
         }
@@ -80,22 +103,25 @@ static TXUGCPublishOptCenter *_shareInstance = nil;
     _signature = signature;
 }
 
-//刷新httpdns
+// Refresh HTTPDNS
 - (Boolean)reFresh:(TXUGCPrepareUploadCompletion)prepareUploadComplete {
     @synchronized(_cosRegionInfo) {
         _minCosRespTime = 0;
         _cosRegionInfo.domain = @"";
         _cosRegionInfo.region = @"";
+        _cosRegionInfo.isQuic = NO;
     }
+    
+    long preloadStartTime = [[NSDate date] timeIntervalSince1970];
 
     if (_signature == nil || _signature.length == 0) {
         return false;
     }
-    //清掉dns缓存
+    // Clear DNS cache
     [_cacheMap removeAllObjects];
     [_fixCacheMap removeAllObjects];
 
-    //使用了代理，不走httpdns
+    // Using a proxy, do not use HTTPDNS
     if ([self useProxy]) {
         return false;
     }
@@ -116,7 +142,9 @@ static TXUGCPublishOptCenter *_shareInstance = nil;
 
                [self prepareUploadUGC];
            }
-
+        
+           VodLogInfo(@"preUpload result:%d", result);
+           VodLogInfo(@"preloadCostTime:%f", ([[NSDate date] timeIntervalSince1970] - preloadStartTime));
            if (prepareUploadComplete) {
                prepareUploadComplete();
            }
@@ -132,34 +160,59 @@ static TXUGCPublishOptCenter *_shareInstance = nil;
     [self sendHttpRequest:reqUrl
                    method:@"GET"
                      body:nil
+                  timeOut:PRE_UPLOAD_ANA_DNS_TIME_OUT
+                   header:nil
                completion:^(NSData *_Nullable data, int errCode) {
-                 __strong __typeof(weakSelf) self = weakSelf;
-                 if (self == nil) {
-                     if (completion) {
-                         completion(-1);
-                     }
-                     return;
-                 }
-
-                 if (data == nil) {
-                     if (completion) {
-                         completion(-1);
-                     }
-                     return;
-                 }
-
-                 NSString *ips = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-                 NSLog(@"httpdns domain[%@] ips[%@]", domain, ips);
-
-                 NSArray *ipLists = [ips componentsSeparatedByString:@";"];
-                 [self setCacheValue:domain ipLists:ipLists];
-
-                 if (completion) {
-                     completion(errCode);
-                 }
-               }];
+        __strong __typeof(weakSelf) self = weakSelf;
+        if (self == nil) {
+            if (completion) {
+                completion(-1);
+            }
+            return;
+        }
+        
+        if (data == nil) {
+            if (completion) {
+                completion(-1);
+            }
+            return;
+        }
+        
+        NSString *ips = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        VodLogInfo(@"httpdns domain[%@] ips[%@]", domain, ips);
+        
+        NSArray *ipLists = [ips componentsSeparatedByString:@";"];
+        NSMutableArray *ipMutableLists = [[NSMutableArray alloc] init];
+        for(int i = 0; i < ipLists.count; i++) {
+            NSString *ipStr = ipLists[i];
+            if([self checkIPAddreddIsValid:ipStr]) {
+                VodLogInfo(@"httpdns domain[%@] addIps[%@]", domain, ipStr);
+                [ipMutableLists addObject:ipStr];
+            }
+        }
+        [self setCacheValue:domain ipLists:ipMutableLists];
+        VodLogInfo(@"httpdns domain[%@] setIpS[%@]", domain, ipMutableLists);
+        
+        if (completion) {
+            completion(errCode);
+        }
+    }];
 }
 
+/**
+ Determine if the IP address is valid
+ 判断ip地址是否有效
+ */
+- (BOOL)checkIPAddreddIsValid:(NSString*)ipAddress
+{
+    if (ipAddress.length == 0) {
+        return NO;
+    }
+    return [self.regexIpv4 firstMatchInString:ipAddress options:0 range:NSMakeRange(0, [ipAddress length])] ||
+    [self.regexIpv6 firstMatchInString:ipAddress options:0 range:NSMakeRange(0, [ipAddress length])];
+}
+
+// Since NSMutableDictionary is not thread-safe, a separate locking method is created here
 // 由于NSMutableDictionary不是线程安全的，这里单独起一个加锁方法
 - (void)setCacheValue:(NSString *)domain ipLists:(NSArray *)ipLists {
     @synchronized (self) {
@@ -167,23 +220,26 @@ static TXUGCPublishOptCenter *_shareInstance = nil;
     }
 }
 
-//监控网络接入变化
+// Monitor network access changes
+// 监控网络接入变化
 - (void)monitorNetwork {
-    //网络切换的时候刷新一下httpdns
+    // Refresh HTTPDNS when the network switches
     [[AFNetworkReachabilityManager sharedManager] setReachabilityStatusChangeBlock:^(AFNetworkReachabilityStatus status) {
         switch (status) {
             case AFNetworkReachabilityStatusUnknown:
-//                NSLog(@"%@",UGCLocalize(@"UGCVideoUploadDemo.TXUGCPublishOptCenter.unknow"));
+                VodLogInfo(@"network changed, StatusUnknown");
+//                VodLogInfo(@"%@",UGCLocalize(@"UGCVideoUploadDemo.TXUGCPublishOptCenter.unknow"));
                 break;
             case AFNetworkReachabilityStatusNotReachable:
-//                NSLog(@"%@",UGCLocalize(@"UGCVideoUploadDemo.TXUGCPublishOptCenter.notnetwork"));
+                VodLogInfo(@"network changed, StatusNotReachable");
+//                VodLogInfo(@"%@",UGCLocalize(@"UGCVideoUploadDemo.TXUGCPublishOptCenter.notnetwork"));
                 break;
             case AFNetworkReachabilityStatusReachableViaWWAN:
-                NSLog(@"3G|4G");
+                VodLogInfo(@"network changed, 3G|4G");
                 [self reFresh:nil];
                 break;
             case AFNetworkReachabilityStatusReachableViaWiFi:
-                NSLog(@"WiFi");
+                VodLogInfo(@"network changed, WiFi");
                 [self reFresh:nil];
                 break;
             default:
@@ -193,6 +249,7 @@ static TXUGCPublishOptCenter *_shareInstance = nil;
     }];
 }
 
+// Add the IP list of the specified domain, the IP list is returned by the backend
 // 添加指定域名的ip列表，ip列表是后台返回的
 - (void)addDomainDNS:(NSString *)domain ipLists:(NSArray *)ipLists {
     if ([self useProxy]) {
@@ -206,12 +263,21 @@ static TXUGCPublishOptCenter *_shareInstance = nil;
     [_fixCacheMap setValue:ipLists forKey:domain];
 }
 
+// Get the IP lists corresponding to the specified domain
 // 获取指定域名对应的ipLists
 - (NSArray *)query:(NSString *)hostname {
-    if ([[_cacheMap objectForKey:hostname] count] > 0) {
-        return [_cacheMap objectForKey:hostname];
-    } else if ([[_fixCacheMap objectForKey:hostname] count] > 0) {
-        return [_fixCacheMap objectForKey:hostname];
+    if (hostname) {
+        if ([_cacheMap objectForKey:hostname] && [[_cacheMap objectForKey:hostname] count] > 0) {
+            return [_cacheMap objectForKey:hostname];
+        } else if ([_fixCacheMap objectForKey:hostname] && [[_fixCacheMap objectForKey:hostname] count] > 0) {
+            return [_fixCacheMap objectForKey:hostname];
+        } else {
+            NSArray *ipArray = [self queryIpWithDomain:hostname];
+            if([ipArray count] > 0) {
+                [_cacheMap setValue:ipArray forKey:hostname];
+                return ipArray;
+            }
+        }
     }
 
     return nil;
@@ -221,7 +287,8 @@ static TXUGCPublishOptCenter *_shareInstance = nil;
     return _cosRegionInfo.region;
 }
 
-//是否使用了代理
+// Whether a proxy is used
+// 是否使用了代理
 - (BOOL)useProxy {
     CFDictionaryRef dicRef = CFNetworkCopySystemProxySettings();
     if (NULL == dicRef) return NO;
@@ -231,14 +298,13 @@ static TXUGCPublishOptCenter *_shareInstance = nil;
     NSString *proxy = (__bridge NSString *)proxyCFstr;
     CFRelease(dicRef);
     if (proxy != nil) {
-        //使用了代理
         return YES;
     }
-    //没有使用代理
     return NO;
 }
 
-//是否使用了httpdns
+// Whether HTTPDNS is used
+// 是否使用了httpdns
 - (BOOL)useHttpDNS:(NSString *)hostname {
     if ([self query:hostname] != nil) {
         return YES;
@@ -247,22 +313,29 @@ static TXUGCPublishOptCenter *_shareInstance = nil;
 }
 
 - (void)addPublishing:(NSString *)videoPath {
-    [_publishingList setValue:[NSNumber numberWithBool:YES] forKey:videoPath];
+    @synchronized (_publishingList) {
+        [_publishingList setValue:[NSNumber numberWithBool:YES] forKey:videoPath];
+    }
 }
 
 - (void)delPublishing:(NSString *)videoPath {
-    [_publishingList removeObjectForKey:videoPath];
+    @synchronized (_publishingList) {
+        [_publishingList removeObjectForKey:videoPath];
+    }
 }
 
 - (BOOL)isPublishingPublishing:(NSString *)videoPath {
-    return [[_publishingList objectForKey:videoPath] boolValue];
+    @synchronized (_publishingList) {
+        return [[_publishingList objectForKey:videoPath] boolValue];
+    }
 }
 
+// Pre-upload (UGC interface)
 // 预上传（UGC接口）
 - (void)prepareUploadUGC {
     NSString *reqUrl =
         [NSString stringWithFormat:@"https://%@/v3/index.php?Action=PrepareUploadUGC", UGC_HOST];
-    NSLog(@"prepareUploadUGC reqUrl[%@]", reqUrl);
+    VodLogInfo(@"prepareUploadUGC reqUrl[%@]", reqUrl);
 
     NSMutableDictionary *dic = [[NSMutableDictionary alloc] init];
     [dic setValue:TVCVersion forKey:@"clientVersion"];
@@ -279,19 +352,21 @@ static TXUGCPublishOptCenter *_shareInstance = nil;
     [self sendHttpRequest:reqUrl
                    method:@"POST"
                      body:body
+                  timeOut: PRE_UPLOAD_TIMEOUT
+                   header:nil
                completion:^(NSData *_Nullable data, int errCode) {
-                 __strong __typeof(weakSelf) self = weakSelf;
-                 if (self) {
-                     [self reportPublishOptResult:TVC_UPLOAD_EVENT_ID_REQUEST_PREPARE_UPLOAD_RESULT
-                                          errCode:errCode
-                                           errMsg:@""
-                                          reqTime:reqTime
-                                      reqTimeCost:([[NSDate date] timeIntervalSince1970] * 1000 -
-                                                   reqTime)];
-                     [self parsePrepareUploadRsp:data];
-                 }
-                 dispatch_semaphore_signal(semaphore);
-               }];
+        __strong __typeof(weakSelf) self = weakSelf;
+        if (self) {
+            [self reportPublishOptResult:TVC_UPLOAD_EVENT_ID_REQUEST_PREPARE_UPLOAD_RESULT
+                                 errCode:errCode
+                                  errMsg:@""
+                                 reqTime:reqTime
+                             reqTimeCost:([[NSDate date] timeIntervalSince1970] * 1000 -
+                                          reqTime)];
+            [self parsePrepareUploadRsp:data];
+        }
+        dispatch_semaphore_signal(semaphore);
+    }];
     dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER);
 }
 
@@ -309,7 +384,7 @@ static TXUGCPublishOptCenter *_shareInstance = nil;
     }
 
     NSDictionary *dic = ret;
-    NSLog(@"parsePrepareUploadRsp rspData[%@]", dic);
+    VodLogInfo(@"parsePrepareUploadRsp rspData[%@]", dic);
 
     int code = -1;
     if ([[dic objectForKey:@"code"] isKindOfClass:[NSNumber class]]) {
@@ -328,13 +403,13 @@ static TXUGCPublishOptCenter *_shareInstance = nil;
     }
 
     if (cosArray == nil || cosArray.count <= 0) {
-        NSLog(@"parsePrepareUploadRsp cosRegionList is null!");
+        VodLogError(@"parsePrepareUploadRsp cosRegionList is null!");
         return;
     }
-
-    // 最多并发4个请求
-    int maxThreadCount = MIN(4, (int)cosArray.count);
+    
+    int maxThreadCount = MIN(8, (int)cosArray.count * 2);
     NSOperationQueue *operationQueue = [[NSOperationQueue alloc] init];
+    operationQueue.qualityOfService = NSQualityOfServiceUserInitiated;
     operationQueue.maxConcurrentOperationCount = maxThreadCount;
 
     uint64_t reqTime = [[NSDate date] timeIntervalSince1970] * 1000;
@@ -350,7 +425,9 @@ static TXUGCPublishOptCenter *_shareInstance = nil;
               if (self) {
                   if (region.length > 0 && domain.length > 0) {
                       [self getCosDNS:domain ips:ips];
-                      [self quicTest:domain region:region];
+                      if (gEnableQuic) {
+                          [self quicTest:domain region:region];
+                      }
                       [self detectBestCosIP:domain region:region];
                   }
               }
@@ -364,18 +441,54 @@ static TXUGCPublishOptCenter *_shareInstance = nil;
         (isRegionEmpty ? @""
                        : [NSString stringWithFormat:@"%@|%@", self.cosRegionInfo.region,
                                                     self.cosRegionInfo.domain]);
-    [QuicClient shareQuicClient].isQuic = self.cosRegionInfo.isQuic;
-    [QuicClient shareQuicClient].region = self.cosRegionInfo.region;
+    // After the request is completed, set the QUIC timeout to the default
+    [self.quicProxy setTotalTimeoutMillisec:UPLOAD_TIME_OUT_SEC * 1000];
+    
+    VodLogInfo(@"preUploadResult, domain:%@,isQuic:%d,costTime:%f", self.cosRegionInfo.domain, self.cosRegionInfo.isQuic, self.minCosRespTime);
     [self reportPublishOptResult:TVC_UPLOAD_EVENT_ID_DETECT_DOMAIN_RESULT
                          errCode:(isRegionEmpty ? 1 : 0)errMsg:errMsg
                          reqTime:reqTime
                      reqTimeCost:([[NSDate date] timeIntervalSince1970] * 1000 - reqTime)];
 }
 
+
+- (BOOL)isNeedEnableQuic:(NSString *)region {
+    @synchronized (self.cosRegionInfo) {
+        if (region && [region isEqualToString:self.cosRegionInfo.region]) {
+            // check exists ip
+            NSArray* ipList = [self query:self.cosRegionInfo.domain];
+            if (ipList && ipList.count > 0) {
+                BOOL result = self.cosRegionInfo.isQuic;
+                return result;
+            }
+        }
+    }
+    return NO;
+}
+
+- (void)disableQuicIfNeed {
+    @synchronized (self.cosRegionInfo) {
+        if (self.cosRegionInfo && self.cosRegionInfo.isQuic) {
+            self.cosRegionInfo.isQuic = NO;
+        }
+    }
+}
+
+// Send a HEAD request for detection
 // 发送head请求探测
 - (void)detectBestCosIP:(NSString *)domain region:(NSString *)region {
-    NSString *reqUrl = [NSString stringWithFormat:@"http://%@", domain];
-    NSLog(@"detectDomain reqUrl[%@]", reqUrl);
+    NSArray* tmp = [self query:domain];
+    NSString* ip;
+    if (tmp != nil && tmp.count > 0) {
+        ip = [tmp objectAtIndex:0];
+    }
+    NSString *reqUrl;
+    if (ip) {
+        reqUrl = [NSString stringWithFormat:@"https://%@", ip];
+    } else {
+        reqUrl = [NSString stringWithFormat:@"https://%@", domain];
+    }
+    VodLogInfo(@"detectDomain reqUrl[%@]", reqUrl);
 
     dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
     __weak __typeof(self) weakSelf = self;
@@ -384,27 +497,30 @@ static TXUGCPublishOptCenter *_shareInstance = nil;
     [self sendHttpRequest:reqUrl
                    method:@"HEAD"
                      body:nil
+                  timeOut:PRE_UPLOAD_HTTP_DETECT_COMMON_TIMEOUT
+                   header:@{@"host" : domain}
                completion:^(NSData *_Nullable data, int errCode) {
-                 __strong __typeof(weakSelf) self = weakSelf;
-                 if (self != nil) {
-                     if (errCode == 0) {
-                         UInt64 endTs = (UInt64)([[NSDate date] timeIntervalSince1970] * 1000);
-                         UInt64 cosTs = (endTs - beginTs);
-                         NSLog(@"detectBestCosIP domain = %@, result = %d, timeCos = %llu",
-                               domain, errCode, cosTs);
-                         @synchronized(self->_cosRegionInfo) {
-                             [self comparisonTime:cosTs region:region domain:domain isQuic:NO];
-                         }
-                     }
-                 }
-                 dispatch_semaphore_signal(semaphore);
-               }];
-
-    dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER);
+        __strong __typeof(weakSelf) self = weakSelf;
+        if (self != nil) {
+            if (errCode == 0) {
+                UInt64 endTs = (UInt64)([[NSDate date] timeIntervalSince1970] * 1000);
+                UInt64 cosTs = (endTs - beginTs);
+                VodLogInfo(@"detectHttp domain = %@, result = %d, timeCos = %llu",
+                           domain, errCode, cosTs);
+                @synchronized(self->_cosRegionInfo) {
+                    [self comparisonTime:cosTs region:region domain:domain isQuic:NO];
+                }
+            } else {
+                VodLogWarning(@"detectHttp domain:%@ ,req failed, errCode:%i", domain, errCode);
+            }
+        }
+        dispatch_semaphore_signal(semaphore);
+    }];
+    dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, PRE_UPLOAD_HTTP_DETECT_COMMON_TIMEOUT * 2 * NSEC_PER_MSEC));
 }
 
 - (void)getCosDNS:(NSString *)domain ips:(NSString *)ips {
-    //返回的ip列表为空，首先执行httpdns
+    // If the returned IP list is empty, execute HTTPDNS first
     if (ips.length == 0) {
         dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
         [self freshDomain:domain
@@ -418,15 +534,26 @@ static TXUGCPublishOptCenter *_shareInstance = nil;
     }
 }
 
+// Simple HTTP request wrapper
 // 简单包装http请求
 - (void)sendHttpRequest:(NSString *)reqUrl
                  method:(NSString *)method
                    body:(NSData *)body
+                timeOut:(NSTimeInterval)timeout
+                 header:(NSDictionary*)headers
              completion:(TXUGCHttpCompletion)completion {
     // create request
     NSURL *url = [NSURL URLWithString:reqUrl];
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
+    request.timeoutInterval = timeout;
     request.HTTPMethod = method;
+    if (headers) {
+        for (int i = 0; i < headers.count; i++) {
+            NSString *key = headers.allKeys[i];
+            NSString *value = headers.allValues[i];
+            [request setValue:value forHTTPHeaderField:key];
+        }
+    }
     if (body != nil) {
         [request setValue:[NSString stringWithFormat:@"%ld", (long)[body length]]
             forHTTPHeaderField:@"Content-Length"];
@@ -436,6 +563,8 @@ static TXUGCPublishOptCenter *_shareInstance = nil;
 
     NSURLSessionConfiguration *initCfg = [NSURLSessionConfiguration defaultSessionConfiguration];
     [initCfg setTimeoutIntervalForRequest:5];
+    NSArray *protocolArray = @[[TVCHttpMessageURLProtocol class]];
+    initCfg.protocolClasses = protocolArray;
 
     NSURLSession *session = [NSURLSession sessionWithConfiguration:initCfg
                                                           delegate:nil
@@ -443,23 +572,22 @@ static TXUGCPublishOptCenter *_shareInstance = nil;
     __weak NSURLSession *wis = session;
 
     NSURLSessionTask *dnsTask =
-        [session dataTaskWithRequest:request
-                   completionHandler:^(NSData *_Nullable data, NSURLResponse *_Nullable response,
-                                       NSError *_Nullable error) {
-                     // invalid NSURLSession
-                     [wis invalidateAndCancel];
-
-                     if (error) {
-                         if (completion) {
-                             completion(nil, (int)error.code);
-                         }
-                         return;
-                     }
-
-                     if (completion) {
-                         completion(data, 0);
-                     }
-                   }];
+    [session dataTaskWithRequest:request
+               completionHandler:^(NSData *_Nullable data, NSURLResponse *_Nullable response,
+                                   NSError *_Nullable error) {
+        // invalid NSURLSession
+        [wis invalidateAndCancel];
+        if (error) {
+            if (completion) {
+                completion(nil, (int)error.code);
+            }
+            return;
+        }
+        
+        if (completion) {
+            completion(data, 0);
+        }
+    }];
     [dnsTask resume];
 }
 
@@ -482,31 +610,84 @@ static TXUGCPublishOptCenter *_shareInstance = nil;
                region:(NSString *)region
                domain:(NSString *)domain
                isQuic:(BOOL)isQuic{
-    if (self.minCosRespTime == 0 || cosTs < self.minCosRespTime) {
+    if ([self canUpdateBestCos:cosTs isQuic:isQuic]) {
         self.minCosRespTime = cosTs;
         self.cosRegionInfo.region = region;
         self.cosRegionInfo.domain = domain;
         self.cosRegionInfo.isQuic = isQuic;
-        NSLog(@"detectBestCosIP bestCosDomain = %@, bestCosRegion = %@, timeCos = %llu", domain, region, cosTs);
+        VodLogInfo(@"compareBestCosIP bestCosDomain = %@, bestCosRegion = %@, timeCos = %llu, isQuic = %i", domain, region, cosTs, isQuic);
     }
 }
 
-//quic探测
+-(BOOL)canUpdateBestCos:(UInt64)cosTs isQuic:(BOOL)isQuic {
+    BOOL result = NO;
+    if (self.minCosRespTime == 0) {
+        result = true;
+    } else if (self.cosRegionInfo.isQuic) {
+        result = isQuic && cosTs < self.minCosRespTime;
+    } else {
+        if (isQuic) {
+            result = true;
+        } else {
+            result = cosTs < self.minCosRespTime;
+        }
+    }
+    return result;
+}
+
+// QUIC detection
 -(void)quicTest:(NSString *)domain
          region:(NSString *)region{
-    NSArray* tmp = [self.cacheMap valueForKey:domain];
+    NSArray* tmp = [self query:domain];
+    NSString* ip;
     if (tmp != nil && tmp.count > 0) {
-        NSString* ip = [tmp objectAtIndex:0];
-        _quicClient = [QuicClient new];
-        [_quicClient sendQuicRequest:domain ip:ip region:region
-        completion:^(UInt64 cosTs,NSString* domain,NSString* region,BOOL isQuic){
-            if (isQuic) {
-                @synchronized(self->_cosRegionInfo) {
-                    [self comparisonTime:cosTs region:region domain:domain isQuic:YES];
+        ip = [tmp objectAtIndex:0];
+    }
+    if(ip) {
+        dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+        QuicClient *quicClient = [QuicClient new];
+        // hold quicClient when asycn sendQuicRequest
+        @synchronized(_quicClientList) {
+            [_quicClientList addObject:quicClient];
+        }
+        __weak __typeof(self) weakSelf = self;
+        [quicClient sendQuicRequest:domain ip:ip region:region
+                         completion:^(UInt64 cosTs,NSString* domain,NSString* region,BOOL isQuic){
+            __strong __typeof(weakSelf) self = weakSelf;
+            if (self) {
+                if (isQuic) {
+                    @synchronized(self->_cosRegionInfo) {
+                        VodLogInfo(@"detectQuic domain = %@, isQuic = %d, timeCos = %llu",
+                                   domain, isQuic, cosTs);
+                        [self comparisonTime:cosTs region:region domain:domain isQuic:YES];
+                    }
+                } else {
+                    VodLogWarning(@"domain %@ is not a quic,ip:%@", domain, ip);
                 }
             }
+            dispatch_semaphore_signal(semaphore);
         }];
+        dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, PRE_UPLOAD_HTTP_DETECT_COMMON_TIMEOUT * 2 * NSEC_PER_MSEC));
+        @synchronized (_quicClientList) {
+            [_quicClientList removeObject:quicClient];
+        }
     }
+}
+
+- (NSMutableArray*)queryIpWithDomain:(NSString *)domain {
+    struct hostent *hs;
+    char   **pptr;
+    char   str[32];
+    NSMutableArray *domainIpArray = [[NSMutableArray alloc] init];
+    if ((hs = gethostbyname([domain UTF8String])) != NULL) {
+        for(pptr = hs->h_addr_list; *pptr != NULL; pptr++) {
+            NSString * ipStr = [NSString stringWithCString:inet_ntop(hs->h_addrtype, *pptr, str, sizeof(str)) encoding:NSUTF8StringEncoding];
+            if(ipStr && ipStr.length > 0) {
+                [domainIpArray addObject:ipStr];
+            }
+        }
+    }
+    return domainIpArray;
 }
 
 @end

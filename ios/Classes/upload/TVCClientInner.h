@@ -8,11 +8,26 @@
 
 #import "TVCHeader.h"
 
+#define VOD_SERVER_DOMESTIC_HOST @"uploadsignal.vodplayvideo.net"
+#define VOD_SERVER_DOMESTIC_HOST_BAK @"uploadsignal.vodplayvideo.com"
+#define VOD_SERVER_INTL_HOST @"uploadsignal.vodglcdn.com"
+#define VOD_SERVER_INTL_HOST_BAK @"uploadsignal.vod-common.com"
+
+//#define VOD_REPORT_DOMESTIC_HOST @"https://uploadreport.vodplayvideo.net"
+//#define VOD_REPORT_DOMESTIC_HOST_BAK @"https://uploadreport.vodplayvideo.com"
+//#define VOD_REPORT_INTL @"https://uploadreport.vodglcdn.com"
+//#define VOD_REPORT_INTL_BAK @"https://uploadreport.vod-common.com"
+
+#define VOD_REPORT_DOMESTIC_HOST @"https://vodreport.qcloud.com"
+#define VOD_REPORT_DOMESTIC_HOST_BAK @"https://vodreport.qcloud.com"
+#define VOD_REPORT_INTL @"https://vodreport.qcloud.com"
+#define VOD_REPORT_INTL_BAK @"https://vodreport.qcloud.com"
+
 
 #define UGC_HOST        @"vod2.qcloud.com"
 #define UGC_HOST_BAK    @"vod2.dnsv1.com"
 
-// 最大请求次数
+// Maximum number of requests
 #define kMaxRequestCount 2
 
 #pragma mark - UCG rsp parse
@@ -21,20 +36,20 @@
 #define kMessage        @"message"
 #define kData           @"data"
 
-#define TVCVersion @"1.1.4.0"
+#define TVCVersion @"1.2.9.0"
 
 #pragma mark - COS config
-//字段废弃，作为InitUploadUGC的占位字段
+// Field deprecated, used as a placeholder field for InitUploadUGC
 #define kRegion @"gz"
-//超时时间
-#define kTimeoutInterval 10
+// Timeout
+#define kTimeoutInterval 20
 
-//log
-#ifndef __OPTIMIZE__
-#define NSLog(...) NSLog(__VA_ARGS__)
-#else
-#define NSLog(...){}
-#endif
+static NSString *VOD_SERVER_HOST = VOD_SERVER_DOMESTIC_HOST;
+static NSString *VOD_SERVER_HOST_BAK = VOD_SERVER_DOMESTIC_HOST_BAK;
+
+#define TXQCloudRaceTypeOnlyQUIC 0
+#define TXQCloudRaceTypeQUICHTTP 1
+#define TXQCloudRaceTypeOnlyHTTP 2
 
 @interface TVCUGCResult : NSObject
 
@@ -43,6 +58,7 @@
 @property(nonatomic,strong) NSString * imageFileId;
 
 /**
+ Number in JSON
  json中为数字
  */
 @property(nonatomic,strong) NSString * uploadAppid;
@@ -65,19 +81,21 @@
 
 @property(atomic,assign) int useCosAcc;
 
+@property (nonatomic, strong) NSString* uploadDomain;       // complete domain
+
 @property(nonatomic,strong) NSString * cosAccDomain;
 
-@property(nonatomic,strong) NSString * userAppid;           // 用户appid，用于数据上报
+@property(nonatomic,strong) NSString * userAppid;           // User appid, used for data reporting
 
-@property(nonatomic,strong) NSString * tmpSecretId;         // cos临时密钥SecretId
+@property(nonatomic,strong) NSString * tmpSecretId;         // COS temporary secret key SecretId
 
-@property(nonatomic,strong) NSString * tmpSecretKey;        // cos临时密钥SecretKey
+@property(nonatomic,strong) NSString * tmpSecretKey;        // COS temporary secret key SecretKey
 
-@property(nonatomic,strong) NSString * tmpToken;            // cos临时密钥Token
+@property(nonatomic,strong) NSString * tmpToken;            // COS temporary secret key Token
 
-@property(atomic,assign) uint64_t  tmpExpiredTime;          // cos临时密钥ExpiredTime
+@property(atomic,assign) uint64_t  tmpExpiredTime;          // COS temporary secret key ExpiredTime
 
-@property(atomic,assign) uint64_t  currentTS;               // 后台返回的校准时间戳
+@property(atomic,assign) uint64_t  currentTS;               // Calibrated timestamp returned by the backend
 
 @end
 
@@ -111,21 +129,24 @@
 
 @property(atomic,assign) uint64_t currentUpload;
 
-@property(atomic,assign) uint64_t videoLastModTime; // 文件最后修改时间
+@property(atomic,assign) uint64_t videoLastModTime; // Last modified time of the file
 
-@property(atomic,assign) uint64_t coverLastModTime; // 封面最后修改时间
+@property(atomic,assign) uint64_t coverLastModTime; // Last modified time of the cover
+// Request start time, used to calculate the time consumption of each request
+@property(atomic,assign) uint64_t reqTime;
+// Request upload time, used to concatenate the publishing process with the last modified
+// time of the video to form reqKey
+@property(atomic,assign) uint64_t initReqTime;
+// Retry due to temporary signature expiration causing upload failure
+@property(nonatomic,assign) BOOL isShouldRetry;
 
-@property(atomic,assign) uint64_t reqTime;          // 请求开始时间，用于统计各请求耗时
+@property(nonatomic,assign) int vodCmdRequestCount;   // VOD signaling request times
+// Msg for main domain name request failure, used for backup domain name request failure reporting
+@property(nonatomic,copy) NSString* mainVodServerErrMsg;
 
-@property(atomic,assign) uint64_t initReqTime;      // 请求上传时间，用于和视频最后修改时间组成reqKey，串联发布流程
+@property(nonatomic,strong) NSData * resumeData;    // COS chunk upload resumeData
 
-@property(nonatomic,assign) BOOL isShouldRetry;     // 由于临时签名过期导致的上传失败，重试
-
-@property(nonatomic,assign) int vodCmdRequestCount;   // vod信令请求次数
-
-@property(nonatomic,copy) NSString* mainVodServerErrMsg;   // //主域名请求失败的msg，用于备份域名都请求失败后，带回上报。
-
-@property(nonatomic,strong) NSData * resumeData;    // cos分片上传resumeData
+@property(atomic, assign) BOOL isQuic;
 
 @end
 
@@ -170,6 +191,8 @@
 
 @property(atomic,assign) int useCosAcc;
 
+@property(atomic, strong) NSString *cosVideoPath;
+
 @property(atomic,assign) uint64_t tcpConnTimeCost;
 
 @property(atomic,assign) uint64_t recvRespTimeCost;
@@ -179,5 +202,24 @@
 @property(nonatomic,assign) BOOL reporting;
 
 @property(nonatomic,strong) NSString * requestId;
+
+@end
+
+/**
+ Resume cache
+ */
+@interface ResumeCacheData : NSObject
+// Upload session
+// 上传session
+@property(nonatomic,strong) NSString * vodSessionKey;
+// COS chunk upload resumeData
+// cos分片上传resumeData
+@property(nonatomic,strong) NSData * resumeData;
+// Last modified time of the file
+// 文件最后修改时间
+@property(atomic,assign) uint64_t videoLastModTime;
+// Last modified time of the cover
+// 封面最后修改时间
+@property(atomic,assign) uint64_t coverLastModTime;
 
 @end

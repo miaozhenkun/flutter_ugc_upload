@@ -11,11 +11,13 @@
 @interface TVCUtils : NSObject
 
 /**
+ * Get accurate device model
  * 获取准确的设备型号
  */
 + (NSString *)tvc_deviceModelName;
 
 /**
+ * Get network type
  * 获取网络类型
  */
 + (int) tvc_getNetWorkType;
@@ -25,5 +27,13 @@
 + (NSString *) tvc_getPackageName;
 
 + (NSString *)tvc_getDevUUID;
+
++ (id)findObj:(NSDictionary*)dic withKey:(NSString*)key withClass:(Class)claz withDet:(id)obj;
+
++ (id)findObj:(NSDictionary*)dic withKey:(NSString*)key withClass:(Class)claz;
+
++ (id)findObjForce:(NSDictionary*)dic withKey:(NSString*)key withClass:(Class)claz;
+
++ (BOOL)isEmptyString:(NSString *)aStr;
 
 @end

@@ -6,18 +6,13 @@
 //
 
 #import <Foundation/Foundation.h>
-#import "TquicConnection.h"
 
 NS_ASSUME_NONNULL_BEGIN
 typedef void (^TXUGCQuicCompletion)(UInt64 cosTs,NSString* domain,NSString* region,BOOL isQuic);
  /**
-  *用来进行quic探测
+  * Used for QUIC detection.
   */
  @interface QuicClient : NSObject
-//保存quic探测后的region
- @property (nonatomic,strong) NSString* region;
-//是否支持quic
- @property (nonatomic,assign) BOOL isQuic;
  
  + (QuicClient *) shareQuicClient;
  
